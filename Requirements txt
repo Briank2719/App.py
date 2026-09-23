@@ -1,0 +1,133 @@
+flash gunicorn
+
+from ursina import *
+from ursina.prefabs.health_bar import HealthBar
+import random, math, json, os, datetime, socket, threading, time
+import urllib.request
+app = Ursina()
+window.title = 'AUSTRALIAN HIGHWAY TRUCK SIM - VOLVO | SCANIA | ISUZU | RFX | 422KM FUEL'
+'window.borderless = False'
+LICENSE_FILE = "license.json"
+TRIAL_DAYS = 7.5
+def is_internet():
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=3)
+        return True
+    except:
+        return False
+def auto_renew_check():
+    try:
+        if not is_internet():
+            return True, TRIAL_DAYS
+        # Check local license
+        if not os.path.exists(LICENSE_FILE):
+            data = {"first_launch": datetime.datetime.now().isoformat()}
+            with open(LICENSE_FILE, "w") as f: json.dump(data, f)
+            return True, TRIAL_DAYS
+        with open(LICENSE_FILE, "r") as f:
+            data = json.load(f)
+        first = datetime.datetime.fromisoformat(data["first_launch"])
+        used = (datetime.datetime.now() - first).total_seconds() / 86400
+        if used >= TRIAL_DAYS:
+            # Try auto-renew via internet
+            print("Trial expired, trying auto-renew via internet...")
+            try:
+                urllib.request.urlopen(SERVER_URL, timeout=5)
+                # If server reachable, renew
+                data = {"first_launch": datetime.datetime.now().isoformat()}
+                with open(LICENSE_FILE, "w") as f: json.dump(data, f)
+                print("AUTO-RENEWED! New 7.5 days started")
+                return True, TRIAL_DAYS
+            except:
+                print("No server, but internet found - auto renewing local")
+                data = {"first_launch": datetime.datetime.now().isoformat()}
+                with open(LICENSE_FILE, "w") as f: json.dump(data, f)
+                return True, TRIAL_DAYS
+        return True, TRIAL_DAYS - used
+    except:
+        return False, 0
+valid, days_left = auto_renew_check()
+if not valid:
+    print("GAME EXPIRED. Connect internet for auto-renew")
+    # app will still run but show lock
+" MAP & LIGHTING "
+Sky(texture='sky_default')
+sun = DirectionalLight(shadows=True)
+sun.look_at(Vec3(1,-1,-1))
+AmbientLight(color=color.rgba(120,120,120,0.7))
+scene.fog_density = 0.012
+scene.fog_color = color.rgb(200,210,230)
+"Australian Highway - 10000m long"
+highway_length = 10000
+road = Entity(model='plane', scale=(30,1,highway_length), pos=(0,-0.1,0), color=color.rgb(50,50,50), texture='white_cube', texture_scale=(2,500))
+for z in range(-4000, 4000, 20):
+    Entity(model='quad', scale=(0.6,4), rotation_x=90, pos=(0,0.02,z), color=color.white)
+"RURAL / BARN / INDUSTRY / MINING AREAS"
+australian_cities = ["SYDNEY","MELBOURNE","BRISBANE","PERTH","ADELAIDE","DARWIN"]
+city_positions = [-3500, -2000, -500, 1000, 2500, 3800]
+def create_rural(z):
+    # Barn
+    barn = Entity(model='cube', scale=(8,6,10), pos=(random.choice([-35,35]),3,z), color=color.rgb(180,40,20))
+    Entity(parent=barn, model='cube', scale=(1.1,0.6,1.1), pos=(0,0.8,0), color=color.rgb(120,20,10), rotation_z=30)
+    # Hay
+    for i in range(3):
+        Entity(model='cube', scale=(2,2,2), pos=(barn.x+random.uniform(-6,6),1,z+random.uniform(-6,6)), color=color.rgb(200,180,100))
+    return barn
+def create_industry(z):
+    factory = Entity(model='cube', scale=(15,12,20), pos=(random.choice([-45,45]),6,z), color=color.rgb(100,100,100))
+    # Chimney
+    Entity(parent=factory, model='cube', scale=(0.2,1.5,0.2), pos=(0.3,1.2,0), color=color.rgb(60,60,60))
+    # Smoke
+    Entity(parent=factory, model='sphere', scale=2, pos=(0.3,2,0), color=color.rgba(80,80,80,100))
+    return factory
+def create_mining(z):
+    mine = Entity(model='cube', scale=(20,2,20), pos=(random.choice([-50,50]),0,z), color=color.rgb(90,60,30))
+    Entity(model='cube', scale=(5,8,5), pos=(mine.x,4,mine.z), color=color.rgb(70,50,20)) # excavator
+    return mine
+def create_business(z):
+    shop = Entity(model='cube', scale=(6,5,8), pos=(random.choice([-18,18]),2.5,z), color=color.rgb(200,200,50), collider='box')
+    shop.tag = "Business"
+    Text3d(text=random.choice(["SHOP","CAFE","TRUCK STOP","MOTEL"]), parent=shop, pos=(0,4,0), scale=5, color=color.black)
+    return shop
+ "Generate whole highway"
+businesses = []
+for z in range(-4000, 4000, 150):
+    r = random.randint(0,100)
+    if r < 20: create_rural(z)
+    elif r < 35: create_industry(z)
+    elif r < 45: create_mining(z)
+    elif r < 70: "businesses.append(create_business(z))
+City markers
+for i, pos in enumerate(city_positions):
+    Entity(model='cube', scale=(30,15,2), pos=(0,7.5,pos), color=color.rgb(20,100,200))
+    Text3d(text=australian_cities[i], pos=(0,16,pos), scale=20, color=color.yellow, origin=(0,0) TRUCKS 
+TRUCKS = {
+    'VOLVO FH16': {'color': color.rgb(10,35,120), 'hp':750, 'scale':(2.8,2.2,5.5)},
+    'SCANIA R730': {'color': color.rgb(180,20,20), 'hp':730, 'scale':(2.8,2.2,5.6)},
+    'ISUZU GIGA': {'color': color.white, 'hp':380, 'scale':(2.5,2.0,5.0)},
+    'RFX TITAN': {'color': color.rgb(20,20,20), 'hp':650, 'scale':(3.0,2.4,6.0)},
+}
+def build_truck(pos, data):
+    root = Entity(model='cube', scale=data['scale'], pos=pos, color=data['color'], collider='box')
+    cabin = Entity(parent=root, model='cube', scale=(0.98,0.7,0.45), pos=(0,0.35,0.38), color=data['color'])
+    Entity(parent=cabin, model='cube', scale=(0.9,0.35,0.05), pos=(0,0.1,0.26), color=color.rgba(150,220,255,180))
+    root.wheels = []
+    for wx in [-1.2,1.2]:
+        for wz in [1.0,0.0,-0.8,-1.6]:
+            w = Entity(parent=root, model='cube', scale=(0.5,0.6,0.6), pos=(wx,-0.6,wz), color=color.black, rotation_z=90)
+            root.wheels.append(w)
+    return root
+player = build_truck(Vec3(0,2,-3800), TRUCKS['VOLVO FH16'])
+player.speed = 0
+player.max_speed = 9
+"Trailer for 2 cargos"
+trailer = None
+cargos = []
+ "FUEL SYSTEM 422KM"
+max_fuel_km = 422
+current_fuel = 422
+distance_traveled = 0
+last_z = player.z
+fuel_text = Text(text=f'FUEL: {current_fuel:.0f}km / 422km', pos=(-0.75,0.45), scale=1.2, color=color.lime)
+fuel_bar = HealthBar(bar_color=color.lime, roundness=0.2, scale=(0.3,0.02), pos=(-0.6,0.42), max_value=422)
+fuel_bar.value = current_fuel.   
